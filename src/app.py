@@ -2,6 +2,8 @@ import http.server
 import socketserver
 import os
 import json
+import io
+from validators import validate_image_file
 
 
 class ImageServerHandler(http.server.BaseHTTPRequestHandler):
@@ -36,6 +38,23 @@ class ImageServerHandler(http.server.BaseHTTPRequestHandler):
 
             form_data = self.rfile.read(int(self.headers['Content-Length']))
 
+            # Отримуємо ім'я файлу з Content-Disposition (якщо є)
+            filename = self._extract_filename(content_type, form_data)
+            file_like = io.BytesIO(form_data)
+
+            is_valid, message = validate_image_file(file_like, filename)
+
+            if not is_valid:
+                response_data = {
+                    'success': False,
+                    'message': message
+                }
+                self.send_response(400)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(response_data).encode('utf-8'))
+                return
+
             response_data = {
                 'success': True,
                 'message': 'File uploaded successfully',
@@ -53,6 +72,18 @@ class ImageServerHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             error_response = {'success': False, 'error': str(e)}
             self.wfile.write(json.dumps(error_response).encode('utf-8'))
+
+    def _extract_filename(self, content_type, form_data):
+        """Витягує ім'я файлу з multipart-даних."""
+        try:
+            decoded = form_data.decode('utf-8', errors='ignore')
+            import re
+            match = re.search(r'filename="([^"]+)"', decoded)
+            if match:
+                return match.group(1)
+        except Exception:
+            pass
+        return "unknown"
 
     def serve_template(self, filename):
         try:
